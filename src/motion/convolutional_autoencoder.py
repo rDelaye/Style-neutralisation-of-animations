@@ -2,36 +2,39 @@ import BVH
 import tkinter as tk
 from tkinter import filedialog
 import Animation 
-from keras.layers import Input, Dense, Conv2D, MaxPooling2D, UpSampling2D, AveragePooling2D
+from keras.layers import Input, Dense, Conv2D, MaxPooling2D, UpSampling2D, AveragePooling2D, Reshape, Lambda
 from keras.models import Model
 from keras.datasets import mnist
 import numpy as np
 from keras.optimizers import SGD
 from Quaternions import Quaternions
+from keras import backend as K
+import tensorflow as tf
 
 
 FRAME_NUMBER = 250
 FILTERS = 64
-CONVO_WINDOW = (2, 3)
-CONVO_STRIDE = (4, 5)
-POOL_REDUCTION = (5, 2)
+CONVO_WINDOW = (3, 2)
+CONVO_STRIDE = (5, 4)
+POOL_REDUCTION = (5, 1)
+CONVO_DEC_WINDOW = (5,4)
 
 
 
 
 
 def load_anim_from_file(filepaths, size):
-    x_train = None  
+    x_train = []  
     new_row = False
     for i in filepaths :
-        anim = None
+        anim = []
         new_line = False
         walk = BVH.load(file_path[0])[0]
         for i in range(0, len(walk.positions)):
             #pos = walk.positions[i]
             #pos = pos.flatten()
             #pos = pos.astype('float32')
-            if(anim != None):
+            if(anim != []):
                 if(len(anim) == FRAME_NUMBER):
                     break
             rotation = walk.rotations[i]
@@ -39,7 +42,7 @@ def load_anim_from_file(filepaths, size):
             #rotation = rotation.flatten()
             #frame_data = np.concatenate((pos, rotation))
             frame_data = np.reshape(rotation, (31,4))
-            if(anim == None):
+            if(anim == []):
                 anim = frame_data
             else:
                 if(not new_line):
@@ -48,7 +51,7 @@ def load_anim_from_file(filepaths, size):
                 else:
                     anim = np.concatenate((anim, [frame_data]))
 
-        if(x_train == None):
+        if(x_train == []):
             x_train = anim
         else:
             if(not new_row):
@@ -91,19 +94,25 @@ print(np.shape(x_train))
 
 
 #network construction
+
+
+
+
 input_anim = Input(shape=(FRAME_NUMBER, size, 4))
 convo_enc = Conv2D(FILTERS, CONVO_WINDOW, activation = 'relu', padding = 'same')(input_anim)
 pool_enc = MaxPooling2D(POOL_REDUCTION, padding = 'same') (convo_enc)
 
-convo_dec = Conv2D(FILTERS, (5,10), activation='relu', padding = 'same')(pool_enc)
+convo_dec = Conv2D(FILTERS, CONVO_DEC_WINDOW, activation='relu', padding = 'same')(pool_enc)
 pool_dec = UpSampling2D(POOL_REDUCTION)(convo_dec)
 decoded = Conv2D(4, CONVO_WINDOW, activation = 'sigmoid', padding = 'same')(pool_dec)
+#new_shape = Reshape((-1, 4), input_shape=(FRAME_NUMBER, size +1, 4))(decoded)
+cut = Lambda(lambda x : x[:, :, :])(decoded)
+#final = Reshape((FRAME_NUMBER, size, 4), input_shape=(FRAME_NUMBER*size, 4))(cut)
 
-
-autoencoder = Model(input_anim, decoded)
+autoencoder = Model(input_anim, cut)
 
 sgd = SGD(lr=0.0001, decay=1e-5, momentum=0.009, nesterov=True)
-autoencoder.compile(optimizer='adadelta', loss='binary_crossentropy')
+autoencoder.compile(optimizer='rmsprop', loss='binary_crossentropy')
 
 
 #training
@@ -120,11 +129,11 @@ for i in range(0,len(x_test)) :
     for j in range(0,len(x_test[i])) :        
         x_yolo2[i][j] = np.concatenate((x_test[i][j], [x_test[i][j][len(x_test[i][j])- 1]]))
 
-autoencoder.fit(x_train, x_yolo,
-                epochs=1000,
+autoencoder.fit(x_train, x_train,
+                epochs=10000,
                 batch_size=200,
                 shuffle=True, 
-                validation_data=(x_test, x_yolo2))
+                validation_data=(x_test, x_test))
 
 
 file_path = filedialog.askopenfilenames()
@@ -139,7 +148,7 @@ print(np.shape(result_frames))
 
 
 result_pos = None
-result_rot = None    
+result_rot = []    
 print(len(result_frames))
 '''
 for i in result_frames :
@@ -153,10 +162,10 @@ for i in result_frames :
         result_rot = np.vstack((result_rot, np.reshape(i[size//7*3:], (1, -1, 4))))
 '''
 result_frames = result_frames[0]
-result_frames = np.delete(result_frames, len(result_frames[0]) - 1, 1)
+#result_frames = np.delete(result_frames, len(result_frames[0]) - 1, 1)
 print(np.shape(result_frames))
 for i in result_frames :
-    if(result_rot == None):
+    if(result_rot == []):
         result_rot =  np.reshape(i, (1, -1, 4))
     else:
         result_rot = np.vstack((result_rot, np.reshape(i, (1, -1, 4))))
